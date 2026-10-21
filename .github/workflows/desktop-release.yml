@@ -77,8 +77,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - name: 安装依赖
-        # hoisted：依赖平铺，standalone 输出可以直接放进安装包
-        run: pnpm install --frozen-lockfile --node-linker=hoisted
+        # 默认布局：Next.js standalone 会完整带上依赖，组装脚本再把它们平铺
+        run: pnpm install --frozen-lockfile
       - name: 套用汉化
         run: node zh/apply.mjs
       - name: 类型检查
@@ -98,10 +98,16 @@ jobs:
       - name: 冒烟测试（用安装包里的文件启动服务）
         shell: pwsh
         run: |
-          $res = Resolve-Path "desktop/dist/win-unpacked/resources"
+          # 复制到与仓库无关的临时目录再启动：Node 会向上级目录查找依赖，
+          # 留在构建目录里测试会借用仓库的 node_modules，掩盖安装包缺模块的问题
+          $src = Resolve-Path "desktop/dist/win-unpacked/resources"
           foreach ($f in @("app/apps/web/server.js", "node/node.exe", "app-update.yml")) {
-            if (!(Test-Path "$res/$f")) { throw "安装包缺少 $f" }
+            if (!(Test-Path "$src/$f")) { throw "安装包缺少 $f" }
           }
+          $res = Join-Path $env:RUNNER_TEMP "isolated\resources"
+          New-Item -ItemType Directory -Force (Split-Path $res) | Out-Null
+          Copy-Item -Recurse -Force $src $res
+          if (Test-Path "$res/app/node_modules") { throw "安装包里仍有外层 node_modules（打包时会被丢弃）" }
           $env:PORT = "3999"; $env:HOSTNAME = "127.0.0.1"; $env:JOURNAL_DATA_DIR = "$env:RUNNER_TEMP\journal-data"
           $p = Start-Process -PassThru -NoNewWindow -FilePath "$res/node/node.exe" -ArgumentList "apps/web/server.js" -WorkingDirectory "$res/app" -RedirectStandardOutput "$env:RUNNER_TEMP\server.log" -RedirectStandardError "$env:RUNNER_TEMP\server.err"
           $ok = $false

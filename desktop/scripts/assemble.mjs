@@ -57,6 +57,35 @@ fs.cpSync(path.join(web, "public"), path.join(out, "apps", "web", "public"), { r
 // 运行时数据目录不应被打包
 fs.rmSync(path.join(out, "apps", "web", "data"), { recursive: true, force: true });
 
+// electron-builder 打包 extraResources 时会丢掉最外层的 node_modules 目录。
+// 把它合并进 apps/web/node_modules（server.js 从那里向上查找依赖），已存在的包以 apps/web 里的为准。
+const rootModules = path.join(out, "node_modules");
+const webModules = path.join(out, "apps", "web", "node_modules");
+if (fs.existsSync(rootModules)) {
+  fs.mkdirSync(webModules, { recursive: true });
+  const merge = (src, dst) => {
+    for (const name of fs.readdirSync(src)) {
+      if (name === ".pnpm" || name === ".bin" || name.startsWith(".")) continue;
+      const s = path.join(src, name);
+      const d = path.join(dst, name);
+      if (name.startsWith("@") && fs.statSync(s).isDirectory()) {
+        fs.mkdirSync(d, { recursive: true });
+        merge(s, d);
+      } else if (!fs.existsSync(d)) fs.renameSync(s, d);
+    }
+  };
+  merge(rootModules, webModules);
+  // pnpm 默认布局：依赖在 node_modules/.pnpm/<包@版本>/node_modules/<包> 下，逐个平铺出来
+  const store = path.join(rootModules, ".pnpm");
+  if (fs.existsSync(store))
+    for (const entry of fs.readdirSync(store)) {
+      const inner = path.join(store, entry, "node_modules");
+      if (fs.existsSync(inner) && fs.statSync(inner).isDirectory()) merge(inner, webModules);
+    }
+  fs.rmSync(rootModules, { recursive: true, force: true });
+  console.log("已把外层 node_modules 合并到 apps/web/node_modules");
+}
+
 fs.rmSync(nodeBin, { recursive: true, force: true });
 fs.mkdirSync(nodeBin, { recursive: true });
 fs.copyFileSync(process.execPath, path.join(nodeBin, process.platform === "win32" ? "node.exe" : "node"));
