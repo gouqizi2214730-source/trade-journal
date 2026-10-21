@@ -17,7 +17,21 @@ if (!fs.existsSync(path.join(standalone, "apps", "web", "server.js")))
 // 递归复制并把符号链接展开为实际文件（fs.cpSync 的 dereference 不处理嵌套链接）
 const repoRoot = path.resolve(desktop, "..");
 // Windows 上 Next 生成的链接（junction）有时无法访问：按包名回到项目自己的 node_modules 找同一个包
+const exists = (p) => {
+  try {
+    fs.statSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
 const fallbackFor = (src) => {
+  // standalone 目录结构与仓库一致：先找仓库里同一相对位置（pnpm 的链接在仓库里是好的）
+  const rel = path.relative(standalone, src);
+  if (!rel.startsWith("..")) {
+    const mirrored = path.join(repoRoot, rel);
+    if (exists(mirrored)) return mirrored;
+  }
   const parts = src.split(/[\\/]/);
   const i = parts.lastIndexOf("node_modules");
   if (i < 0) return null;
