@@ -49,7 +49,7 @@ node zh/apply.mjs --extract   # 生成 zh/untranslated.json，列出还没翻译
 ## 本地开发
 
 ```bash
-pnpm install --node-linker=hoisted
+pnpm install
 node zh/apply.mjs          # 注意：会直接改写 apps/web/src，提交前用 git checkout apps 还原
 pnpm build
 node desktop/scripts/assemble.mjs
