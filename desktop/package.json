@@ -1,0 +1,87 @@
+{
+  "name": "trade-journal-desktop",
+  "productName": "FupanBook",
+  "version": "1.0.0",
+  "description": "复盘本 — 基于 LuxAlgo Trade Journal 的中文桌面版（非官方）",
+  "author": "gouqizi2214730-source",
+  "license": "MIT",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "6.6.2"
+  },
+  "devDependencies": {
+    "electron": "37.2.0",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "io.github.gouqizi2214730.fupanbook",
+    "productName": "FupanBook",
+    "copyright": "MIT — based on LuxAlgo Trade Journal (unofficial)",
+    "artifactName": "FupanBook-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "app",
+        "filter": [
+          "**/*",
+          "**/node_modules/**/*",
+          "**/.next/**/*"
+        ]
+      },
+      {
+        "from": "node-bin",
+        "to": "node",
+        "filter": [
+          "**/*",
+          "**/node_modules/**/*",
+          "**/.next/**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "复盘本",
+      "uninstallDisplayName": "复盘本 ${version}",
+      "deleteAppDataOnUninstall": false,
+      "language": "2052"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "gouqizi2214730-source",
+        "repo": "trade-journal",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

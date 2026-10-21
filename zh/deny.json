@@ -1,0 +1,6 @@
+[
+  "CSV import",
+  "apps/web/src/components/market-csv-settings.tsx::Time",
+  "apps/web/src/components/market-csv-settings.tsx::Open",
+  "apps/web/src/components/market-csv-settings.tsx::Close"
+]

@@ -1,0 +1,60 @@
+// 把 Next.js standalone 输出组装成桌面版要打包的服务端目录。
+//   desktop/server   ← apps/web/.next/standalone（符号链接展开为实际文件）+ static + public
+//   desktop/node-bin ← 当前运行的 node 可执行文件（与 better-sqlite3 原生模块版本一致）
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const web = path.resolve(desktop, "..", "apps", "web");
+const out = path.join(desktop, "server");
+const nodeBin = path.join(desktop, "node-bin");
+
+const standalone = path.join(web, ".next", "standalone");
+if (!fs.existsSync(path.join(standalone, "apps", "web", "server.js")))
+  throw new Error("找不到 apps/web/.next/standalone，请先运行 pnpm build");
+
+// 递归复制并把符号链接展开为实际文件（fs.cpSync 的 dereference 不处理嵌套链接）
+const copyDeref = (src, dst) => {
+  const st = fs.statSync(src); // stat 跟随链接
+  if (st.isDirectory()) {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const name of fs.readdirSync(src)) copyDeref(path.join(src, name), path.join(dst, name));
+  } else {
+    fs.copyFileSync(src, dst);
+    fs.chmodSync(dst, st.mode);
+  }
+};
+fs.rmSync(out, { recursive: true, force: true });
+copyDeref(standalone, out);
+fs.cpSync(path.join(web, ".next", "static"), path.join(out, "apps", "web", ".next", "static"), { recursive: true });
+fs.cpSync(path.join(web, "public"), path.join(out, "apps", "web", "public"), { recursive: true });
+// 运行时数据目录不应被打包
+fs.rmSync(path.join(out, "apps", "web", "data"), { recursive: true, force: true });
+
+fs.rmSync(nodeBin, { recursive: true, force: true });
+fs.mkdirSync(nodeBin, { recursive: true });
+fs.copyFileSync(process.execPath, path.join(nodeBin, process.platform === "win32" ? "node.exe" : "node"));
+if (process.platform !== "win32") fs.chmodSync(path.join(nodeBin, "node"), 0o755);
+
+const find = (dir, name) => {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      const r = find(p, name);
+      if (r) return r;
+    } else if (e.name === name) return p;
+  }
+  return null;
+};
+const native = find(out, "better_sqlite3.node");
+if (!native) throw new Error("服务端缺少 better-sqlite3 原生模块");
+let links = 0;
+(function count(d) {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    if (e.isSymbolicLink()) links++;
+    else if (e.isDirectory()) count(path.join(d, e.name));
+  }
+})(out);
+if (links) throw new Error(`服务端目录仍有 ${links} 个符号链接`);
+console.log(`服务端已组装：${out}\n原生模块：${path.relative(out, native)}\nNode：${process.version}`);

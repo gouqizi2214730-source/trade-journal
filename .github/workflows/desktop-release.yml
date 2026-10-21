@@ -1,0 +1,129 @@
+name: 中文桌面版 · 同步上游并发布
+
+# 1. sync：每天检查 LuxAlgo/trade-journal 是否有更新，有就合并进 main。
+#    汉化和桌面版代码都在 zh/、desktop/ 等独立目录里，合并不会冲突。
+# 2. build：在 Windows 上构建 → 套用汉化 → 打包 exe → 发布到本仓库的 Releases。
+#    已安装的桌面版会从 Releases 自动更新。
+#
+# 触发方式：每天定时、改动 zh/ 或 desktop/ 后推送、或在 Actions 页面手动运行。
+on:
+  schedule:
+    - cron: "17 1 * * *" # 每天 09:17（北京时间）
+  push:
+    branches: [main]
+    paths:
+      - "zh/**"
+      - "desktop/**"
+      - ".github/workflows/desktop-release.yml"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "上游没有更新也重新打包发布"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: 合并上游更新
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/LuxAlgo/trade-journal.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "上游没有新提交"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # 上游工作流文件的改动需要额外权限才能推送，保留本仓库现有版本
+          git merge --no-edit --no-commit upstream/main || true
+          git checkout HEAD -- .github/workflows 2>/dev/null || true
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "::error::合并上游时出现冲突，请手动处理：$(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+            exit 1
+          fi
+          git commit --no-edit -m "合并上游 LuxAlgo/trade-journal 更新" || true
+          git push origin HEAD:main
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.force)
+    runs-on: windows-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: 安装依赖
+        # hoisted：依赖平铺，standalone 输出可以直接放进安装包
+        run: pnpm install --frozen-lockfile --node-linker=hoisted
+      - name: 套用汉化
+        run: node zh/apply.mjs
+      - name: 类型检查
+        run: pnpm --filter web typecheck
+      - name: 构建网页
+        run: pnpm build
+      - name: 组装服务端
+        run: node desktop/scripts/assemble.mjs
+      - name: 设置版本号
+        working-directory: desktop
+        run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+      - name: 打包安装程序
+        working-directory: desktop
+        run: |
+          npm install --no-audit --no-fund
+          npx electron-builder --win --x64 --publish never
+      - name: 冒烟测试（用安装包里的文件启动服务）
+        shell: pwsh
+        run: |
+          $res = Resolve-Path "desktop/dist/win-unpacked/resources"
+          foreach ($f in @("app/apps/web/server.js", "node/node.exe", "app-update.yml")) {
+            if (!(Test-Path "$res/$f")) { throw "安装包缺少 $f" }
+          }
+          $env:PORT = "3999"; $env:HOSTNAME = "127.0.0.1"; $env:JOURNAL_DATA_DIR = "$env:RUNNER_TEMP\journal-data"
+          $p = Start-Process -PassThru -NoNewWindow -FilePath "$res/node/node.exe" -ArgumentList "apps/web/server.js" -WorkingDirectory "$res/app" -RedirectStandardOutput "$env:RUNNER_TEMP\server.log" -RedirectStandardError "$env:RUNNER_TEMP\server.err"
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep 1
+            try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3999/; if ($r.StatusCode -eq 200) { $ok = $true; break } } catch {}
+          }
+          $demo = "未执行"
+          if ($ok) { try { $demo = (Invoke-WebRequest -UseBasicParsing -Method Post http://127.0.0.1:3999/api/demo).Content } catch { $demo = "失败：$($_.Exception.Message)" } }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (!$ok) { Get-Content "$env:RUNNER_TEMP\server.log", "$env:RUNNER_TEMP\server.err" -ErrorAction SilentlyContinue; throw "服务没有响应" }
+          if ($r.Content -notmatch "复盘本") { throw "页面不是中文版" }
+          if ($demo -notmatch "inserted") { throw "数据库写入失败：$demo" }
+          "首页 OK，数据库 OK：$demo"
+          Get-ChildItem desktop/dist -File | Select-Object Name, Length
+      - name: 发布到 GitHub Releases
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --x64 --publish always --prepackaged dist/win-unpacked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TradeJournal-Setup-1.0.${{ github.run_number }}
+          path: desktop/dist/*.exe
+          retention-days: 7
