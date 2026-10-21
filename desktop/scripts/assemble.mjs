@@ -15,8 +15,33 @@ if (!fs.existsSync(path.join(standalone, "apps", "web", "server.js")))
   throw new Error("找不到 apps/web/.next/standalone，请先运行 pnpm build");
 
 // 递归复制并把符号链接展开为实际文件（fs.cpSync 的 dereference 不处理嵌套链接）
+const repoRoot = path.resolve(desktop, "..");
+// Windows 上 Next 生成的链接（junction）有时无法访问：按包名回到项目自己的 node_modules 找同一个包
+const fallbackFor = (src) => {
+  const parts = src.split(/[\\/]/);
+  const i = parts.lastIndexOf("node_modules");
+  if (i < 0) return null;
+  const pkg = parts.slice(i + 1, parts[i + 1]?.startsWith("@") ? i + 3 : i + 2).join(path.sep);
+  for (const base of [path.join(web, "node_modules"), path.join(repoRoot, "node_modules")]) {
+    const cand = path.join(base, pkg);
+    try {
+      if (fs.statSync(cand)) return cand;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+};
 const copyDeref = (src, dst) => {
-  const st = fs.statSync(src); // stat 跟随链接
+  let st;
+  try {
+    st = fs.statSync(src); // stat 跟随链接
+  } catch (e) {
+    const alt = fallbackFor(src);
+    if (!alt) throw e;
+    console.log(`链接无法访问，改用 ${path.relative(repoRoot, alt)}：${path.relative(repoRoot, src)}`);
+    return copyDeref(alt, dst);
+  }
   if (st.isDirectory()) {
     fs.mkdirSync(dst, { recursive: true });
     for (const name of fs.readdirSync(src)) copyDeref(path.join(src, name), path.join(dst, name));
