@@ -335,7 +335,47 @@ patches.push(
     skipIf: "<ZhDataLabels />",
   },
 );
+// 券商扩展：Bybit 成交同步 + 长桥（见 zh/brokers-ext.ts）。上游改动导致补丁失效时让构建失败，避免悄悄丢功能。
+if (!EXTRACT)
+  fs.copyFileSync(path.join(here, "brokers-ext.ts"), path.join(repo, "apps/web/src/server/zh-brokers.ts"));
+const SYNC = "apps/web/src/server/sync.ts";
+patches.push(
+  {
+    file: SYNC,
+    find: /import \{ connect, listBrokers, type BrokerId \} from "@luxalgo\/broker-sdk";/,
+    replace: () => 'import { type BrokerId } from "@luxalgo/broker-sdk";\nimport { connect, listBrokers } from "./zh-brokers";',
+    required: true,
+    skipIf: "./zh-brokers",
+  },
+  {
+    file: SYNC,
+    find: /import \{ eq \} from "drizzle-orm";/,
+    replace: () => 'import { and, desc, eq } from "drizzle-orm";',
+    required: true,
+    skipIf: "import { and, desc, eq }",
+  },
+  {
+    file: SYNC,
+    find: /import \{ accounts, db \} from "@\/db";/,
+    replace: () => 'import { accounts, db, executions } from "@/db";',
+    required: true,
+    skipIf: "accounts, db, executions",
+  },
+  {
+    file: SYNC,
+    find: /(\n\s*)const connection = connect\(\{/,
+    replace: (_m, ws) =>
+      `${ws}// 复盘本：从该账户已同步的最新一笔成交往前补拉；没有成交则回溯券商允许的最长历史` +
+      `${ws}const zhLatest = db.select({ t: executions.executedAt }).from(executions)` +
+      `${ws}  .where(and(eq(executions.accountId, accountId), eq(executions.source, "sync")))` +
+      `${ws}  .orderBy(desc(executions.executedAt)).limit(1).get();` +
+      `${ws}const connection = connect({${ws}  zhSince: zhLatest?.t ?? null,`,
+    required: true,
+    skipIf: "zhSince:",
+  },
+);
 let patched = 0;
+const missed = [];
 if (!EXTRACT)
   for (const p of patches) {
     const f = path.join(repo, p.file);
@@ -346,7 +386,8 @@ if (!EXTRACT)
     if (after !== before) {
       fs.writeFileSync(f, after);
       patched++;
-    } else if (!p.optional) console.warn(`[zh] 补丁未命中（上游可能已改动）：${p.file} ${p.find}`);
+    } else if (p.required) missed.push(`${p.file} ${p.find}`);
+    else if (!p.optional) console.warn(`[zh] 补丁未命中（上游可能已改动）：${p.file} ${p.find}`);
   }
 
 const list = [...missing.entries()]
@@ -360,3 +401,7 @@ console.log(
     ? `[zh] 扫描完成：词典 ${total} 条，未翻译界面文字 ${list.length} 条 → zh/untranslated.json`
     : `[zh] 已汉化 ${touched} 个文件、${replaced} 处文字，补丁 ${patched} 处；仍未翻译 ${list.length} 条（见 zh/untranslated.json）`,
 );
+if (missed.length) {
+  console.error(`[zh] 券商扩展补丁未命中，上游 sync.ts 可能已改动，需要更新 zh/apply.mjs：\n  ${missed.join("\n  ")}`);
+  process.exit(1);
+}
