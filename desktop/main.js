@@ -344,6 +344,43 @@ const syncAll = async ({ manual = false } = {}) => {
     syncing = false;
     refreshTrayMenu();
   }
+  // 新成交（以及之前没算完的）补上入场位置标签
+  locateAll();
+};
+
+// ---------------------------------------------------------------- 入场位置标注
+let locating = false;
+const locateAll = async ({ manual = false, force = false } = {}) => {
+  if (locating || !serverUrl) return;
+  locating = true;
+  let done = 0;
+  let failed = 0;
+  const errors = [];
+  try {
+    let first = true;
+    for (let round = 0; round < 50; round++) {
+      const r = (await api("POST", "/api/zh-location", { limit: 40, force: force && first })) || {};
+      first = false;
+      done += r.done || 0;
+      failed += r.failed || 0;
+      for (const e of r.errors || []) if (!errors.includes(e)) errors.push(e);
+      if (!r.remaining || !r.done) break;
+    }
+    if (done || failed) log("locate", "done", done, "failed", failed, errors.join(" | "));
+    if (manual)
+      notify(
+        "入场位置标注",
+        done || !failed
+          ? `已标注 ${done} 笔交易${failed ? `，${failed} 笔暂时失败（稍后会自动重试）` : ""}。`
+          : `没能获取 Bybit K 线：${errors[0] || "未知错误"}`,
+      );
+    if (done > 0 && mainWindow && !mainWindow.isVisible()) mainWindow.webContents.reload();
+  } catch (e) {
+    log("locate failed", e && e.message);
+    if (manual) notify("入场位置标注失败", e.message);
+  } finally {
+    locating = false;
+  }
 };
 const scheduleSync = () => {
   if (syncTimer) clearInterval(syncTimer);
@@ -493,6 +530,8 @@ const buildMenu = () =>
         label: "文件",
         submenu: [
           { label: "立即同步全部账户", accelerator: "F5", click: () => syncAll({ manual: true }) },
+          { label: "补全入场位置标签", click: () => locateAll({ manual: true }) },
+          { label: "全部重新计算入场位置", click: () => locateAll({ manual: true, force: true }) },
           {
             label: "定时同步",
             submenu: [0, 10, 20, 30, 60].map((m) => ({

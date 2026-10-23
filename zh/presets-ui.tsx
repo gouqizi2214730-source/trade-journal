@@ -11,8 +11,8 @@ import { postJson, useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
 import { ZH_PLAYBOOKS } from "@/lib/zh-presets";
 
-/** 自动打的位置标签前缀（阶段三），不放进快捷按钮 */
-const AUTO_PREFIX = "位置·";
+/** 自动打的位置 / 时段标签不放进快捷按钮 */
+const AUTO_TAG = /^(位置|时段)·/;
 
 export function ZhPresetPlaybooks({
   existing,
@@ -80,7 +80,7 @@ export function ZhQuickPick({
     const counts = new Map<string, number>();
     for (const t of data?.trades ?? [])
       for (const s of t[field] ?? [])
-        if (!s.startsWith(AUTO_PREFIX)) counts.set(s, (counts.get(s) ?? 0) + 1);
+        if (!AUTO_TAG.test(s)) counts.set(s, (counts.get(s) ?? 0) + 1);
     const own = [...counts.entries()]
       .filter(([s]) => !options.includes(s))
       .sort((a, b) => b[1] - a[1])

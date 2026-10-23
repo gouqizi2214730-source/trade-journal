@@ -97,18 +97,8 @@ export const ZH_MISTAKES = [
   "计划外交易",
 ];
 
-/** 交易详情页「标签」快捷按钮：行情背景与时段 */
-export const ZH_TAGS = [
-  "趋势日",
-  "震荡日",
-  "开盘在价值区内",
-  "开盘在价值区外",
-  "亚盘",
-  "欧盘",
-  "美盘",
-  "A+ 形态",
-  "计划内",
-];
+/** 交易详情页「标签」快捷按钮：当日类型与形态质量（时段、价值区位置等由「入场位置」自动标注） */
+export const ZH_TAGS = ["趋势日", "震荡日", "双向扫荡日", "A+ 形态", "B 级形态", "计划内", "新闻行情"];
 
 export const ZH_TEMPLATES: { id: string; name: string; content: string }[] = [
   {

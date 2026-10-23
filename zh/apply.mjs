@@ -34,7 +34,7 @@ const listFiles = (dir) => {
     const p = path.join(dir, f);
     const st = fs.statSync(p);
     if (st.isDirectory()) {
-      if (["node_modules", "tests", "__tests__", "dist", ".next"].includes(f)) continue;
+      if (["node_modules", "tests", "__tests__", "dist", ".next"].includes(f) || f.startsWith("zh-")) continue;
       out.push(...listFiles(p));
     } else if (/\.(tsx?|mts)$/.test(f) && !/\.(test|spec)\.tsx?$/.test(f) && !f.endsWith(".d.ts") && !f.startsWith("zh-")) {
       out.push(p);
@@ -455,11 +455,59 @@ patches.push(
       file: TR,
       find: new RegExp(`(debounced\\(\\{ ${field}: parseList\\(event\\.target\\.value\\) \\}\\);\\n\\s*\\}\\}\\n[^\\n]*placeholder=[^\\n]*\\n(\\s*)\\/>)`),
       replace: (m, _all, ind) =>
-        `${m}\n${ind}<ZhQuickPick options={${list}} field="${field}" value={${field}} onChange={(next) => { ${setter}(next); debounced({ ${field}: parseList(next) }); }} />`,
+        `${m}\n${ind}<ZhQuickPick options={${list}} field="${field}" value={${field}} onChange={(next) => { ${setter}(next); debounced({ ${field}: ${field === "tags" ? "zhWithAuto(parseList(next), trade.tagsJson)" : "parseList(next)"} }); }} />`,
       required: true,
       skipIf: `field="${field}"`,
     };
   }),
+);
+// ---------------------------------------------------------------- 入场位置自动标注（Bybit 公开 K 线）
+if (!EXTRACT) {
+  fs.copyFileSync(path.join(here, "location.ts"), path.join(repo, "apps/web/src/server/zh-location.ts"));
+  fs.copyFileSync(path.join(here, "location-ui.tsx"), path.join(repo, "apps/web/src/components/zh-location-ui.tsx"));
+  fs.mkdirSync(path.join(repo, "apps/web/src/app/api/zh-location"), { recursive: true });
+  fs.copyFileSync(path.join(here, "location-route.ts"), path.join(repo, "apps/web/src/app/api/zh-location/route.ts"));
+  fs.copyFileSync(path.join(here, "bybit-market.ts"), path.join(repo, "apps/web/src/server/market-data/zh-bybit.ts"));
+}
+// 「行情数据与回放」加 Bybit 公开 K 线
+const MDC = "apps/web/src/server/market-data/connections.ts";
+const MDP = "apps/web/src/lib/market-providers.ts";
+const BYBIT_INFO = `  {
+    id: "bybit",
+    name: "Bybit",
+    mode: "public",
+    description:
+      "Bybit 公开 K 线（USDT/USDC 永续，含股票永续；现货代码加 .SPOT 后缀），无需 API 密钥。价格单位与 Bybit 成交一致。",
+    symbolHint: "永续直接用 BTCUSDT、MUUSDT；现货用 ETHUSDT.SPOT（和复盘本同步来的代码一样）。",
+    fields: [],
+  },
+`;
+patches.push(
+  { file: MDC, find: /(import \{ binance, coinbase \} from "\.\/public-crypto";\n)/, replace: (m) => m + 'import { bybitKline } from "./zh-bybit";\n', required: true, skipIf: "zh-bybit" },
+  { file: MDC, find: /(\n\s*binance,\n)/, replace: (m) => m + "  bybitKline,\n", required: true, skipIf: "  bybitKline," },
+  { file: MDP, find: /(export const MARKET_PROVIDERS: ProviderInfo\[\] = \[\n)/, replace: (m) => m + BYBIT_INFO, required: true, skipIf: 'id: "bybit"' },
+  // 交易列表的标签列不显示自动位置标签（太长）；详情页「入场位置」卡片和报告里照常可见
+  {
+    file: "apps/web/src/app/trades/page.tsx",
+    find: /\{getValue<string\[\]>\(\)\.map\(\(tag\) => \(/,
+    replace: () => "{getValue<string[]>().filter((tag) => !/^(位置|时段)·/.test(tag)).map((tag) => (",
+    optional: true,
+  },
+  // USDT/USDC 永续和 .SPOT 现货默认选 Bybit 行情源
+  {
+    file: "apps/web/src/components/trade-market-data.tsx",
+    find: /const \[provider, setProvider\] = useState\(""\);/,
+    replace: () => 'const [provider, setProvider] = useState(/(USDT|USDC|PERP)(\\.SPOT)?$/.test(trade.symbol) ? "bybit" : "");',
+    optional: true,
+  },
+);
+patches.push(
+  { file: TR, find: /(import \{ RuleChecklist \} from "@\/components\/rule-checklist";\n)/, replace: (m) => m + 'import { ZhLocationCard, zhAutoKey, zhOwnTags, zhWithAuto } from "@/components/zh-location-ui";\n', required: true, skipIf: "zh-location-ui" },
+  { file: TR, find: /\n(\s*)<TradeMarketData trade=\{trade\} executions=\{executions\} \/>/, replace: (m, ind) => `${m}\n${ind}<ZhLocationCard tradeKey={trade.key} onUpdated={refresh} />`, required: true, skipIf: "<ZhLocationCard" },
+  { file: TR, find: /<AnnotationsCard key=\{trade\.key\}/, replace: () => "<AnnotationsCard key={zhAutoKey(trade.key, trade.tagsJson)}", required: true, skipIf: "zhAutoKey(trade.key" },
+  // 手动标签框只显示自己的标签；保存时带上自动标签
+  { file: TR, find: /useState\(\(JSON\.parse\(trade\.tagsJson \?\? "\[\]"\) as string\[\]\)\.join\(", "\)\)/, replace: () => 'useState(zhOwnTags(trade.tagsJson).join(", "))', required: true, skipIf: "zhOwnTags(trade.tagsJson)" },
+  { file: TR, find: /debounced\(\{ tags: parseList\(event\.target\.value\) \}\)/, replace: () => "debounced({ tags: zhWithAuto(parseList(event.target.value), trade.tagsJson) })", required: true, skipIf: "zhWithAuto(parseList(event.target.value)" },
 );
 let patched = 0;
 const missed = [];
