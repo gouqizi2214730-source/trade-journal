@@ -429,7 +429,8 @@ if (!EXTRACT)
   for (const p of patches) {
     const f = path.join(repo, p.file);
     if (!fs.existsSync(f)) continue;
-    const before = fs.readFileSync(f, "utf8");
+    // Windows 构建机检出的是 CRLF 换行，统一成 LF 再匹配（补丁规则按 LF 编写）
+    const before = fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n");
     if (p.skipIf && before.includes(p.skipIf)) continue;
     const after = before.replace(p.find, p.replace);
     if (after !== before) {
@@ -451,6 +452,6 @@ console.log(
     : `[zh] 已汉化 ${touched} 个文件、${replaced} 处文字，补丁 ${patched} 处；仍未翻译 ${list.length} 条（见 zh/untranslated.json）`,
 );
 if (missed.length) {
-  console.error(`[zh] 券商扩展补丁未命中，上游 sync.ts 可能已改动，需要更新 zh/apply.mjs：\n  ${missed.join("\n  ")}`);
+  console.error(`[zh] 必需的补丁未命中（上游代码可能已改动），需要更新 zh/apply.mjs：\n  ${missed.join("\n  ")}`);
   process.exit(1);
 }
