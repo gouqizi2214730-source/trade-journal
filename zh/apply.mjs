@@ -423,6 +423,44 @@ patches.push(
     skipIf: "复盘本：笔记中的图片",
   },
 );
+// ---------------------------------------------------------------- PA / VP / VWAP 预设
+if (!EXTRACT) {
+  fs.copyFileSync(path.join(here, "presets.ts"), path.join(repo, "apps/web/src/lib/zh-presets.ts"));
+  fs.copyFileSync(path.join(here, "presets-ui.tsx"), path.join(repo, "apps/web/src/components/zh-presets-ui.tsx"));
+}
+const PB = "apps/web/src/app/playbooks/page.tsx";
+const TR = "apps/web/src/app/trades/[key]/page.tsx";
+patches.push(
+  // 笔记模板下拉里加入中文模板（放在最前面）
+  { file: RE, find: /(import \{ tradeLinkLabel[^\n]*\n)/, replace: (m) => m + 'import { ZH_TEMPLATES } from "@/lib/zh-presets";\n', required: true, skipIf: "ZH_TEMPLATES" },
+  { file: RE, find: /const BUILT_INS = \[\n/, replace: (m) => m + "  ...ZH_TEMPLATES,\n", required: true, skipIf: "...ZH_TEMPLATES" },
+  { file: RE, find: /placeholder = "Write your review…",/, replace: () => 'placeholder = "写下你的复盘…（可直接粘贴截图）",', optional: true },
+  // 策略手册页：一键导入预设策略
+  { file: PB, find: /(import \{ postJson, useApi \} from "@\/lib\/use-api";\n)/, replace: (m) => m + 'import { ZhPresetPlaybooks } from "@/components/zh-presets-ui";\n', required: true, skipIf: "zh-presets-ui" },
+  {
+    file: PB,
+    find: /actions=\{\n(\s*)(<Button size="sm" onClick=\{\(\) => setOpen\(true\)\}>[\s\S]*?<\/Button>)\n(\s*)\}/,
+    replace: (_m, ind, btn, end) =>
+      `actions={\n${ind}<>\n${ind}<ZhPresetPlaybooks existing={data?.playbooks} onDone={refresh} />\n${ind}${btn}\n${ind}</>\n${end}}`,
+    required: true,
+    skipIf: "<ZhPresetPlaybooks",
+  },
+  // 交易详情页：标签 / 错误快捷按钮；中文逗号、顿号也能分隔
+  { file: TR, find: /(import \{ RuleChecklist \} from "@\/components\/rule-checklist";\n)/, replace: (m) => m + 'import { ZhQuickPick } from "@/components/zh-presets-ui";\nimport { ZH_MISTAKES, ZH_TAGS } from "@/lib/zh-presets";\n', required: true, skipIf: "ZhQuickPick" },
+  { file: TR, find: /(const parseList = \(value: string\) =>\n\s*value\n\s*)\.split\(","\)/, replace: (_m, head) => `${head}.split(/[,，、]/)`, required: true, skipIf: ".split(/[,，、]/)" },
+  ...["tags", "mistakes"].map((field) => {
+    const setter = field === "tags" ? "setTags" : "setMistakes";
+    const list = field === "tags" ? "ZH_TAGS" : "ZH_MISTAKES";
+    return {
+      file: TR,
+      find: new RegExp(`(debounced\\(\\{ ${field}: parseList\\(event\\.target\\.value\\) \\}\\);\\n\\s*\\}\\}\\n[^\\n]*placeholder=[^\\n]*\\n(\\s*)\\/>)`),
+      replace: (m, _all, ind) =>
+        `${m}\n${ind}<ZhQuickPick options={${list}} field="${field}" value={${field}} onChange={(next) => { ${setter}(next); debounced({ ${field}: parseList(next) }); }} />`,
+      required: true,
+      skipIf: `field="${field}"`,
+    };
+  }),
+);
 let patched = 0;
 const missed = [];
 if (!EXTRACT)

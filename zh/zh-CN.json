@@ -881,7 +881,7 @@
   "Movement": "变动",
   "Multiple currencies": "多种币种",
   "multiplier:": "乘数：",
-  "Name (e.g. Opening range breakout)": "名称（例如：开盘区间突破）",
+  "Name (e.g. Opening range breakout)": "名称（例如：VWAP 回踩延续）",
   "Needs 5+ closed trades. The formula is open —": "需要至少 5 笔已平仓交易。公式是公开的——",
   "Negative net P&L": "净盈亏为负",
   "Net": "净额",
@@ -982,7 +982,7 @@
   "On": "开",
   "on or after {0}": "不早于 {0}",
   "on or before {0}": "不晚于 {0}",
-  "One rule per line: Only A+ setups Risk max 1R No entries after 11:30": "每行一条规则：只做 A+ 形态 单笔风险不超过 1R 11:30 之后不再开仓",
+  "One rule per line: Only A+ setups Risk max 1R No entries after 11:30": "每行一条规则：\nVWAP 斜率与方向一致\n回踩处出现拒绝 K 线\n止损放在流动性池外",
   "One trading day; both extrema are the same.": "只有一个交易日，最高值和最低值相同。",
   "One-line description": "一句话描述",
   "only completed historical candles can be imported.": "只能导入已完成的历史 K 线。",
@@ -1536,5 +1536,7 @@
   "Your setup, why you took the trade, or what you learned…": "你的交易形态、入场理由，或者学到了什么…",
   "Your share (%)": "你的分成比例（%）",
   "YYYY-MM-DD": "YYYY-MM-DD",
-  "Zero net P&L": "净盈亏为零"
+  "Zero net P&L": "净盈亏为零",
+  "apps/web/src/app/trades/[key]/page.tsx::chased entry, moved stop": "点下面的按钮选择，或手动输入，逗号分隔",
+  "apps/web/src/app/trades/[key]/page.tsx::breakout, A+ setup": "点下面的按钮选择，或手动输入，逗号分隔"
 }
