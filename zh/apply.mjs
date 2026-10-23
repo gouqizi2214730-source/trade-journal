@@ -36,7 +36,7 @@ const listFiles = (dir) => {
     if (st.isDirectory()) {
       if (["node_modules", "tests", "__tests__", "dist", ".next"].includes(f)) continue;
       out.push(...listFiles(p));
-    } else if (/\.(tsx?|mts)$/.test(f) && !/\.(test|spec)\.tsx?$/.test(f) && !f.endsWith(".d.ts")) {
+    } else if (/\.(tsx?|mts)$/.test(f) && !/\.(test|spec)\.tsx?$/.test(f) && !f.endsWith(".d.ts") && !f.startsWith("zh-")) {
       out.push(p);
     }
   }
@@ -372,6 +372,55 @@ patches.push(
       `${ws}const connection = connect({${ws}  zhSince: zhLatest?.t ?? null,`,
     required: true,
     skipIf: "zhSince:",
+  },
+);
+// 笔记粘贴图片（见 zh/note-paste.ts）
+if (!EXTRACT) fs.copyFileSync(path.join(here, "note-paste.ts"), path.join(repo, "apps/web/src/lib/zh-note-paste.ts"));
+const RE = "apps/web/src/components/rich-editor.tsx";
+const ATT = "apps/web/src/components/attachments.tsx";
+patches.push(
+  { file: RE, find: /(import \{ tradeLinkLabel[^\n]*\n)/, replace: (m) => m + 'import { usePasteImages, type AttachTarget } from "@/lib/zh-note-paste";\n', required: true, skipIf: "zh-note-paste" },
+  { file: RE, find: /(\n  editorRef,\n\}: \{)/, replace: () => "\n  editorRef,\n  attachTo,\n}: {", required: true, skipIf: "  attachTo,\n" },
+  { file: RE, find: /(\n  editorRef\?: Ref<RichEditorHandle>;\n)/, replace: (m) => m + "  attachTo?: AttachTarget;\n", required: true, skipIf: "attachTo?: AttachTarget" },
+  {
+    file: RE,
+    find: /(const preview = mode \? mode === "preview" : localPreview;)/,
+    replace: (m) => m + "\n  const zhPaste = usePasteImages(ref, value, onChange, attachTo);",
+    required: true,
+    skipIf: "zhPaste = usePasteImages",
+  },
+  {
+    file: RE,
+    find: /(onChange=\{\(e\) => onChange\(e\.target\.value\)\}\n(\s*)placeholder=\{placeholder\}\n)/,
+    replace: (m, _all, ind) => `${m}${ind}{...zhPaste.handlers}\n`,
+    required: true,
+    skipIf: "zhPaste.handlers",
+  },
+  {
+    file: RE,
+    find: /(\n(\s*)\{error && \(\n\s*<p role="alert" className="text-xs text-destructive">\n\s*\{error\}\n\s*<\/p>\n\s*\)\}\n\s*<\/div>\n\s*\);\n\}\s*$)/,
+    replace: (m, _all, ind) =>
+      `\n${ind}{!preview && zhPaste.hint && (\n${ind}  <p className={\`text-xs \${zhPaste.hintIsError ? "text-destructive" : "text-muted-foreground"}\`}>{zhPaste.hint}</p>\n${ind})}` + m,
+    required: true,
+    skipIf: "zhPaste.hint &&",
+  },
+  { file: ATT, find: /import \{ useRef, useState \} from "react";/, replace: () => 'import { useEffect, useRef, useState } from "react";\nimport { ATTACHMENTS_CHANGED } from "@/lib/zh-note-paste";', required: true, skipIf: "ATTACHMENTS_CHANGED" },
+  {
+    file: ATT,
+    find: /(const input = useRef<HTMLInputElement>\(null\);)/,
+    replace: (m) => m + "\n  useEffect(() => {\n    window.addEventListener(ATTACHMENTS_CHANGED, refresh);\n    return () => window.removeEventListener(ATTACHMENTS_CHANGED, refresh);\n  }, [refresh]);",
+    required: true,
+    skipIf: "addEventListener(ATTACHMENTS_CHANGED",
+  },
+  { file: "apps/web/src/app/notebook/page.tsx", find: /<RichEditor\n(\s*)editorRef=\{editor\}/, replace: (m, ind) => `${m}\n${ind}attachTo={{ type: "note", id: note.id }}`, required: true, skipIf: 'type: "note", id: note.id' },
+  { file: "apps/web/src/app/journal/[date]/page.tsx", find: /<RichEditor editorRef=\{noteEditor\}/, replace: (m) => `${m} attachTo={{ type: "day", id: date }}`, required: true, skipIf: 'type: "day", id: date' },
+  { file: "apps/web/src/app/trades/[key]/page.tsx", find: /<RichEditor\n(\s*)editorRef=\{noteEditor\}/, replace: (m, ind) => `${m}\n${ind}attachTo={{ type: "trade", id: trade.key }}`, required: true, skipIf: 'type: "trade", id: trade.key' },
+  {
+    file: "apps/web/src/app/globals.css",
+    find: /$/,
+    replace: () => "\n/* 复盘本：笔记中的图片 */\n.journal-markdown img { max-width: 100%; height: auto; border-radius: 6px; margin: 0.5rem 0; }\n",
+    required: true,
+    skipIf: "复盘本：笔记中的图片",
   },
 );
 let patched = 0;
