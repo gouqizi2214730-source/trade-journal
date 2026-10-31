@@ -349,14 +349,15 @@ patches.push(
   },
   {
     file: SYNC,
-    find: /import \{ eq \} from "drizzle-orm";/,
+    // 上游有时只导入 eq，有时导入 and, eq
+    find: /import \{ (?:and, )?eq \} from "drizzle-orm";/,
     replace: () => 'import { and, desc, eq } from "drizzle-orm";',
     required: true,
     skipIf: "import { and, desc, eq }",
   },
   {
     file: SYNC,
-    find: /import \{ accounts, db \} from "@\/db";/,
+    find: /import \{ accounts, db(?:, executions)? \} from "@\/db";/,
     replace: () => 'import { accounts, db, executions } from "@/db";',
     required: true,
     skipIf: "accounts, db, executions",
@@ -492,6 +493,15 @@ patches.push(
     find: /\{getValue<string\[\]>\(\)\.map\(\(tag\) => \(/,
     replace: () => "{getValue<string[]>().filter((tag) => !/^(位置|时段)·/.test(tag)).map((tag) => (",
     optional: true,
+  },
+  // 账户页「上次同步」原样显示 UTC 时间（北京时间 11 点显示成 03 点），改成本地时间
+  {
+    file: "apps/web/src/app/accounts/page.tsx",
+    find: /\{account\.lastSyncAt\?\.slice\(0, 16\)\.replace\("T", " "\)\}/g,
+    replace: () =>
+      '{account.lastSyncAt && new Date(account.lastSyncAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}',
+    required: true,
+    skipIf: "new Date(account.lastSyncAt)",
   },
   // USDT/USDC 永续和 .SPOT 现货默认选 Bybit 行情源
   {

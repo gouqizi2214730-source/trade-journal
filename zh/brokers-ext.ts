@@ -23,7 +23,7 @@ type SnapshotAccount = {
   currency: string;
   equity: number;
   cash?: number;
-  positions: { symbol: string; quantity: number; marketValue?: number; averageEntryPrice?: number; assetClass?: string }[];
+  positions: { symbol: string; quantity: number; marketValue?: number; averageEntryPrice?: number; assetClass?: string; positionSide?: string }[];
   trades: Trade[];
 };
 type Snapshot = { broker: string; fetchedAt: string; accounts: SnapshotAccount[] };
