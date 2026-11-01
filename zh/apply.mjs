@@ -470,6 +470,41 @@ if (!EXTRACT) {
   fs.copyFileSync(path.join(here, "location-route.ts"), path.join(repo, "apps/web/src/app/api/zh-location/route.ts"));
   fs.copyFileSync(path.join(here, "bybit-market.ts"), path.join(repo, "apps/web/src/server/market-data/zh-bybit.ts"));
 }
+// 长桥 OAuth 2.0 授权（替代 App Key / Secret / Access Token）
+if (!EXTRACT) {
+  fs.copyFileSync(path.join(here, "longbridge-oauth.ts"), path.join(repo, "apps/web/src/server/zh-longbridge-oauth.ts"));
+  fs.copyFileSync(path.join(here, "longbridge-ui.tsx"), path.join(repo, "apps/web/src/components/zh-longbridge-ui.tsx"));
+  fs.mkdirSync(path.join(repo, "apps/web/src/app/api/zh-longbridge"), { recursive: true });
+  fs.copyFileSync(path.join(here, "longbridge-route.ts"), path.join(repo, "apps/web/src/app/api/zh-longbridge/route.ts"));
+}
+const IMP = "apps/web/src/app/import/page.tsx";
+const ACC = "apps/web/src/app/accounts/page.tsx";
+patches.push(
+  { file: IMP, find: /(import \{ AccountPicker \} from "@\/components\/account-picker";\n)/, replace: (m) => m + 'import { ZhLongbridgeOAuth } from "@/components/zh-longbridge-ui";\n', required: true, skipIf: "zh-longbridge-ui" },
+  {
+    file: IMP,
+    find: /(\{broker\.readOnlySetup\}\n(\s*)<\/p>)/,
+    replace: (m, _all, ind) =>
+      `${m}\n${ind}{broker.id === "longbridge" && (\n${ind}  <ZhLongbridgeOAuth value={credentials.zhOAuth ?? ""} onAuthorized={(ref) => setCredentials((c) => ({ ...c, zhOAuth: ref }))} />\n${ind})}`,
+    required: true,
+    skipIf: "<ZhLongbridgeOAuth",
+  },
+  {
+    file: IMP,
+    find: /\(broker\.id === "ibkr-flex" && !isTimeZone\(settingsData\?\.importTimeZone\)\)/,
+    replace: (m) => `${m} ||\n                (broker.id === "longbridge" && !credentials.zhOAuth)`,
+    required: true,
+    skipIf: 'broker.id === "longbridge" && !credentials.zhOAuth',
+  },
+  { file: ACC, find: /(import \{ AccountCreateForm \} from "@\/components\/account-create-form";\n)/, replace: (m) => m + 'import { ZhLongbridgeReauth } from "@/components/zh-longbridge-ui";\n', required: true, skipIf: "zh-longbridge-ui" },
+  {
+    file: ACC,
+    find: /\n(\s*)\{account\.kind === "sync" && \(/,
+    replace: (m, ind) => `\n${ind}{account.broker === "longbridge" && <ZhLongbridgeReauth accountId={account.id} onDone={refresh} />}${m}`,
+    required: true,
+    skipIf: "<ZhLongbridgeReauth",
+  },
+);
 // 「行情数据与回放」加 Bybit 公开 K 线
 const MDC = "apps/web/src/server/market-data/connections.ts";
 const MDP = "apps/web/src/lib/market-providers.ts";

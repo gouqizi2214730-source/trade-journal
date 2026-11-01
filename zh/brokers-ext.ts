@@ -4,11 +4,12 @@
  * LuxAlgo 的 @luxalgo/broker-sdk 对 Bybit 只读钱包余额（trades 恒为空），也没有长桥。
  * 这里包一层：
  *   - bybit：余额仍走 SDK，另外调用 Bybit V5「成交记录」接口补上 USDT/USDC 永续和现货成交；
- *   - longbridge：长桥 OpenAPI（App Key + App Secret + Access Token），余额、持仓、历史成交；
+ *   - longbridge：长桥 OpenAPI（OAuth 2.0 授权；旧的 App Key 方式仍兼容），余额、持仓、历史成交；
  *   - 其他券商：原样交给 SDK。
  * 全部是只读请求，不会下单。
  */
 import { createHash, createHmac } from "node:crypto";
+import { getToken, type LbToken } from "./zh-longbridge-oauth";
 import {
   connect as sdkConnect,
   listBrokers as sdkListBrokers,
@@ -190,17 +191,30 @@ const longbridgeHeaders = (creds: Credentials, method: string, path: string, que
   };
 };
 
+/** OAuth 2.0 模式：X-Api-Key 为 client_id，Authorization 为 Bearer 令牌，不签名（与官方 SDK 一致） */
+const oauthHeaders = (token: LbToken) => ({
+  "X-Api-Key": token.clientId,
+  Authorization: `Bearer ${token.accessToken}`,
+  "X-Timestamp": Math.floor(Date.now() / 1000).toString(),
+  "x-dc-region": token.accessToken.startsWith("us_") ? "us" : "ap",
+  "Content-Type": "application/json; charset=utf-8",
+});
+
 let longbridgeHost: string | null = null;
 const longbridgeGet = async <T>(creds: Credentials, path: string, params: Record<string, string> = {}): Promise<T> => {
   const query = new URLSearchParams(params).toString();
-  const hosts = longbridgeHost ? [longbridgeHost] : LONGBRIDGE_HOSTS;
+  const oauthRef = creds.zhOAuth;
+  let token = oauthRef ? await getToken(oauthRef) : null;
+  // OAuth 令牌在哪个域名签发就用哪个域名；旧的密钥方式依次尝试
+  const hosts = token ? [token.base] : longbridgeHost ? [longbridgeHost] : LONGBRIDGE_HOSTS;
   let lastError: unknown = null;
+  let refreshed = false;
   for (const host of hosts) {
     for (let attempt = 0; attempt < 4; attempt++) {
       let res: Response;
       try {
         res = await fetch(`${host}${path}${query ? `?${query}` : ""}`, {
-          headers: longbridgeHeaders(creds, "GET", path, query),
+          headers: token ? oauthHeaders(token) : longbridgeHeaders(creds, "GET", path, query),
           signal: AbortSignal.timeout(20000),
         });
       } catch (error) {
@@ -212,9 +226,21 @@ const longbridgeGet = async <T>(creds: Credentials, path: string, params: Record
         await sleep(1500 * (attempt + 1));
         continue;
       }
-      longbridgeHost = host;
+      if (!token) longbridgeHost = host;
+      if (token && res.status === 401 && !refreshed) {
+        // 令牌被提前作废：强制续期一次再试
+        token = await getToken(oauthRef!, true);
+        refreshed = true;
+        continue;
+      }
+      if (token && (res.status === 403 || body?.code === 403308))
+        throw new Error("长桥授权缺少权限：请在「账户」页点「重新授权」，并勾选「账户资产/持仓」和「订单/成交查询」");
       if (res.status === 401 || res.status === 403)
-        throw new Error("长桥认证失败：请检查 App Key、App Secret 和 Access Token（Access Token 有有效期，过期需在开发者中心重新生成）");
+        throw new Error(
+          token
+            ? "长桥授权已失效，请在「账户」页点「重新授权」"
+            : "长桥认证失败：旧的 App Key 方式已不推荐，请在「账户」页点「重新授权」改用长桥账号授权",
+        );
       if (!res.ok || !body || body.code !== 0)
         throw new Error(`长桥接口返回错误：${body?.message ?? `HTTP ${res.status}`}`);
       return body.data as T;
@@ -233,8 +259,8 @@ const longbridgeMarkets = (creds: Credentials): Set<string> | null => {
 };
 
 const fetchLongbridge = async (creds: Credentials, since?: string | null): Promise<Snapshot> => {
-  if (!creds.appKey || !creds.appSecret || !creds.accessToken)
-    throw new Error("长桥连接需要 App Key、App Secret 和 Access Token");
+  if (!creds.zhOAuth && !(creds.appKey && creds.appSecret && creds.accessToken))
+    throw new Error("长桥还没有授权：请在连接长桥时点「在浏览器中授权」");
   const markets = longbridgeMarkets(creds);
   const inMarket = (symbol: string) => !markets || markets.has(symbol.split(".").pop()!.toUpperCase());
   const currency = (creds.currency || (markets && markets.size === 1 && markets.has("HK") ? "HKD" : "USD")).toUpperCase();
@@ -322,14 +348,9 @@ const fetchLongbridge = async (creds: Credentials, since?: string | null): Promi
 const LONGBRIDGE_INFO = {
   id: "longbridge",
   displayName: "长桥 Longbridge（LongPort）",
-  credentials: [
-    { key: "appKey", label: "App Key", secret: false },
-    { key: "appSecret", label: "App Secret", secret: true },
-    { key: "accessToken", label: "Access Token", secret: true },
-    { key: "markets", label: "同步市场（optional，默认 US；可填 US,HK 或 ALL）", secret: false },
-  ],
+  credentials: [{ key: "markets", label: "同步市场（optional，默认 US；可填 US,HK 或 ALL）", secret: false }],
   readOnlySetup:
-    "在长桥开发者中心（open.longbridge.com）开通 OpenAPI，进入「用户中心」获取 App Key、App Secret 和 Access Token。只读取余额、持仓和成交，不会下单。Access Token 有有效期，过期后需重新生成并更新连接。注意：长桥成交接口不提供手续费，盈亏为未扣费金额；日志账户为单一币种，默认只同步美股，混合港美股会导致金额无法比较。",
+    "用长桥账号 OAuth 2.0 授权，不需要 App Key / Secret。点下面「在浏览器中授权」，登录长桥后勾选「账户资产/持仓」和「订单/成交查询」两项只读权限即可（不要勾交易下单）。授权会自动续期，失效时在「账户」页点「重新授权」。只读取余额、持仓和成交，不会下单。注意：长桥成交接口不提供手续费，盈亏为未扣费金额；日志账户为单一币种，默认只同步美股，混合港美股会导致金额无法比较。",
   supportsBars: false,
 } as unknown as BrokerInfo;
 
